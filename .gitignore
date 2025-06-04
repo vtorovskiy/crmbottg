@@ -1,0 +1,37 @@
+# ROOT .gitignore
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.production
+.env.staging
+*.log
+logs/
+uploads/
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+coverage/
+.nyc_output/
+
+# Backend specific
+backend/dist/
+backend/uploads/
+backend/logs/
+backend/.env
+
+# Frontend specific
+frontend/dist/
+frontend/.env.local
+
+# Database
+*.sqlite
+*.db
+
+# Production files
+ssl/
+backups/
