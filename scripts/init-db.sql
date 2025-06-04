@@ -100,8 +100,9 @@ CREATE INDEX IF NOT EXISTS idx_contact_data_contact_id ON contact_data(contact_i
 CREATE INDEX IF NOT EXISTS idx_contact_data_field_id ON contact_data(field_id);
 
 -- Insert default admin user (password: admin123456)
+-- Hash generated with bcrypt rounds=12 for admin123456
 INSERT INTO users (email, password_hash, role)
-VALUES ('admin@example.com', '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/LewdBPj2ukD2LB5OG', 'admin')
+VALUES ('admin@example.com', '$2b$12$BpPhWnltDh06vJLHcSJNYe9/1Lq0vCyGxHdd5cjCXm7xS26rvBmwm', 'admin')
 ON CONFLICT (email) DO NOTHING;
 
 -- Insert default contact fields
