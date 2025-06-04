@@ -98,6 +98,8 @@ app.use(notFoundHandler)
 app.use(errorHandler)
 
 // Graceful shutdown handling
+let server: any;
+
 const gracefulShutdown = (signal: string) => {
   logger.info(`Received ${signal}. Starting graceful shutdown...`)
 
@@ -121,7 +123,7 @@ const startServer = async () => {
     logger.info('Database connected successfully')
 
     // Start HTTP server
-    const server = app.listen(PORT, () => {
+    server = app.listen(PORT, () => {
       logger.info(`🚀 Server running on port ${PORT}`)
       logger.info(`📱 Environment: ${process.env.NODE_ENV}`)
       logger.info(`🔗 API: http://localhost:${PORT}/api`)
