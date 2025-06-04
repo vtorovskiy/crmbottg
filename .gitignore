@@ -2,6 +2,9 @@
 node_modules/
 dist/
 build/
+package-lock.json
+yarn.lock
+pnpm-lock.yaml
 .env
 .env.local
 .env.production
@@ -23,10 +26,12 @@ backend/dist/
 backend/uploads/
 backend/logs/
 backend/.env
+backend/package-lock.json
 
 # Frontend specific
 frontend/dist/
 frontend/.env.local
+frontend/package-lock.json
 
 # Database
 *.sqlite
