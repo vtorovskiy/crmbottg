@@ -14,7 +14,14 @@ export const useAuthStore = create<AuthState>()(
 
       login: async (email: string, password: string) => {
         try {
+          console.log('🔐 Attempting login...', { email })
+
           const response = await authApi.login({ email, password })
+
+          if (!response.success) {
+            throw new Error(response.message || 'Login failed')
+          }
+
           const { user, token } = response.data
 
           // Сохраняем токен в localStorage
@@ -26,33 +33,85 @@ export const useAuthStore = create<AuthState>()(
             isLoading: false
           })
 
-          toast.success('Добро пожаловать!')
+          console.log('✅ Login successful', { user: user.email })
+          toast.success(`Добро пожаловать, ${user.email}!`)
+
         } catch (error: any) {
-          const message = error.response?.data?.message || 'Ошибка входа'
-          toast.error(message)
+          console.error('❌ Login error:', error)
+
+          // Очищаем состояние при ошибке
+          set({
+            user: null,
+            isAuthenticated: false,
+            isLoading: false
+          })
+
+          // Определяем сообщение об ошибке
+          let errorMessage = 'Ошибка входа в систему'
+
+          if (error.response?.data?.message) {
+            errorMessage = error.response.data.message
+          } else if (error.message) {
+            errorMessage = error.message
+          } else if (error.response?.status === 401) {
+            errorMessage = 'Неверный email или пароль'
+          } else if (error.response?.status >= 500) {
+            errorMessage = 'Ошибка сервера. Попробуйте позже.'
+          } else if (error.code === 'NETWORK_ERROR') {
+            errorMessage = 'Не удается подключиться к серверу'
+          }
+
+          toast.error(errorMessage)
           throw error
         }
       },
 
       logout: () => {
+        try {
+          // Вызываем API logout (может быть асинхронным)
+          authApi.logout().catch(error => {
+            console.warn('Logout API call failed:', error)
+            // Не показываем ошибку пользователю, так как локальный logout все равно произойдет
+          })
+        } catch (error) {
+          console.warn('Logout API call failed:', error)
+        }
+
+        // Очищаем локальное состояние
         localStorage.removeItem('authToken')
+
         set({
           user: null,
           isAuthenticated: false,
           isLoading: false
         })
+
+        console.log('👋 User logged out')
         toast.success('Вы вышли из системы')
       },
 
       checkAuth: async () => {
         try {
           const token = localStorage.getItem('authToken')
+
           if (!token) {
-            set({ isLoading: false })
+            console.log('🔍 No auth token found')
+            set({
+              user: null,
+              isAuthenticated: false,
+              isLoading: false
+            })
             return
           }
 
+          console.log('🔍 Checking auth with existing token...')
+
           const response = await authApi.getProfile()
+
+          if (!response.success) {
+            throw new Error('Profile fetch failed')
+          }
+
           const user = response.data
 
           set({
@@ -60,258 +119,63 @@ export const useAuthStore = create<AuthState>()(
             isAuthenticated: true,
             isLoading: false
           })
-        } catch (error) {
+
+          console.log('✅ Auth check successful', { user: user.email })
+
+        } catch (error: any) {
+          console.warn('❌ Auth check failed:', error)
+
+          // Токен недействителен или ошибка сервера
           localStorage.removeItem('authToken')
+
           set({
             user: null,
             isAuthenticated: false,
             isLoading: false
+          })
+
+          // Не показываем toast при проверке аутентификации
+          // Пользователь просто будет перенаправлен на логин
+        }
+      },
+
+      // Дополнительные методы для удобства
+      getCurrentUser: () => {
+        return get().user
+      },
+
+      isLoggedIn: () => {
+        return get().isAuthenticated && !!get().user
+      },
+
+      hasRole: (role: string) => {
+        const user = get().user
+        return user?.role === role
+      },
+
+      updateUser: (updates: Partial<User>) => {
+        const currentUser = get().user
+        if (currentUser) {
+          set({
+            user: { ...currentUser, ...updates }
           })
         }
       },
     }),
     {
       name: 'auth-storage',
+      // Сохраняем только основные данные, исключаем функции и loading состояние
       partialize: (state) => ({
         user: state.user,
         isAuthenticated: state.isAuthenticated
       }),
+      // Восстанавливаем состояние при загрузке
+      onRehydrateStorage: () => (state) => {
+        if (state) {
+          // После восстановления из localStorage всегда проверяем актуальность токена
+          state.isLoading = true
+        }
+      },
     }
   )
 )
-
-// frontend/src/store/chatStore.ts
-import { create } from 'zustand'
-import type { ChatState, Contact, Message } from '@/types'
-
-export const useChatStore = create<ChatState>((set, get) => ({
-  contacts: [],
-  selectedContactId: null,
-  messages: {},
-  isLoading: false,
-  searchQuery: '',
-
-  setSelectedContact: (contactId) => {
-    set({ selectedContactId: contactId })
-  },
-
-  setSearchQuery: (query) => {
-    set({ searchQuery: query })
-  },
-
-  addMessage: (message) => {
-    set((state) => ({
-      messages: {
-        ...state.messages,
-        [message.contactId]: [
-          ...(state.messages[message.contactId] || []),
-          message
-        ].sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime())
-      }
-    }))
-  },
-
-  updateMessage: (messageId, updates) => {
-    set((state) => {
-      const newMessages = { ...state.messages }
-      Object.keys(newMessages).forEach(contactId => {
-        newMessages[parseInt(contactId)] = newMessages[parseInt(contactId)].map(msg =>
-          msg.id === messageId ? { ...msg, ...updates } : msg
-        )
-      })
-      return { messages: newMessages }
-    })
-  },
-
-  deleteMessage: (messageId) => {
-    set((state) => {
-      const newMessages = { ...state.messages }
-      Object.keys(newMessages).forEach(contactId => {
-        newMessages[parseInt(contactId)] = newMessages[parseInt(contactId)].filter(
-          msg => msg.id !== messageId
-        )
-      })
-      return { messages: newMessages }
-    })
-  },
-}))
-
-// frontend/src/services/api.ts
-import axios, { AxiosInstance, AxiosResponse } from 'axios'
-import toast from 'react-hot-toast'
-import type {
-  ApiResponse,
-  PaginatedResponse,
-  User,
-  Contact,
-  Deal,
-  Message,
-  ContactField,
-  DealStage,
-  DashboardStats,
-  LoginForm
-} from '@/types'
-
-class ApiService {
-  private api: AxiosInstance
-
-  constructor() {
-    this.api = axios.create({
-      baseURL: import.meta.env.VITE_API_URL || '/api',
-      timeout: 30000,
-      headers: {
-        'Content-Type': 'application/json',
-      },
-    })
-
-    // Request interceptor для добавления токена
-    this.api.interceptors.request.use(
-      (config) => {
-        const token = localStorage.getItem('authToken')
-        if (token) {
-          config.headers.Authorization = `Bearer ${token}`
-        }
-        return config
-      },
-      (error) => Promise.reject(error)
-    )
-
-    // Response interceptor для обработки ошибок
-    this.api.interceptors.response.use(
-      (response) => response,
-      (error) => {
-        if (error.response?.status === 401) {
-          localStorage.removeItem('authToken')
-          window.location.href = '/login'
-          toast.error('Сессия истекла. Войдите снова.')
-        } else if (error.response?.status >= 500) {
-          toast.error('Ошибка сервера. Попробуйте позже.')
-        }
-        return Promise.reject(error)
-      }
-    )
-  }
-
-  // Generic methods
-  private async get<T>(url: string, params?: any): Promise<ApiResponse<T>> {
-    const response: AxiosResponse<ApiResponse<T>> = await this.api.get(url, { params })
-    return response.data
-  }
-
-  private async post<T>(url: string, data?: any): Promise<ApiResponse<T>> {
-    const response: AxiosResponse<ApiResponse<T>> = await this.api.post(url, data)
-    return response.data
-  }
-
-  private async put<T>(url: string, data?: any): Promise<ApiResponse<T>> {
-    const response: AxiosResponse<ApiResponse<T>> = await this.api.put(url, data)
-    return response.data
-  }
-
-  private async delete<T>(url: string): Promise<ApiResponse<T>> {
-    const response: AxiosResponse<ApiResponse<T>> = await this.api.delete(url)
-    return response.data
-  }
-
-  // Auth API
-  auth = {
-    login: (data: LoginForm) => this.post<{ user: User; token: string }>('/auth/login', data),
-    getProfile: () => this.get<User>('/auth/profile'),
-    logout: () => this.post('/auth/logout'),
-  }
-
-  // Contacts API
-  contacts = {
-    getAll: (params?: any) => this.get<PaginatedResponse<Contact>>('/contacts', params),
-    getById: (id: number) => this.get<Contact>(`/contacts/${id}`),
-    create: (data: any) => this.post<Contact>('/contacts', data),
-    update: (id: number, data: any) => this.put<Contact>(`/contacts/${id}`, data),
-    delete: (id: number) => this.delete(`/contacts/${id}`),
-    search: (query: string) => this.get<Contact[]>(`/contacts/search?q=${encodeURIComponent(query)}`),
-  }
-
-  // Contact Fields API
-  contactFields = {
-    getAll: () => this.get<ContactField[]>('/contact-fields'),
-    create: (data: any) => this.post<ContactField>('/contact-fields', data),
-    update: (id: number, data: any) => this.put<ContactField>(`/contact-fields/${id}`, data),
-    delete: (id: number) => this.delete(`/contact-fields/${id}`),
-    reorder: (fields: Array<{ id: number; position: number }>) =>
-      this.put('/contact-fields/reorder', { fields }),
-  }
-
-  // Deals API
-  deals = {
-    getAll: (params?: any) => this.get<PaginatedResponse<Deal>>('/deals', params),
-    getById: (id: number) => this.get<Deal>(`/deals/${id}`),
-    create: (data: any) => this.post<Deal>('/deals', data),
-    update: (id: number, data: any) => this.put<Deal>(`/deals/${id}`, data),
-    delete: (id: number) => this.delete(`/deals/${id}`),
-    updateStage: (id: number, stageId: number) =>
-      this.put(`/deals/${id}/stage`, { stageId }),
-  }
-
-  // Deal Stages API
-  dealStages = {
-    getAll: () => this.get<DealStage[]>('/deal-stages'),
-    create: (data: any) => this.post<DealStage>('/deal-stages', data),
-    update: (id: number, data: any) => this.put<DealStage>(`/deal-stages/${id}`, data),
-    delete: (id: number) => this.delete(`/deal-stages/${id}`),
-    reorder: (stages: Array<{ id: number; position: number }>) =>
-      this.put('/deal-stages/reorder', { stages }),
-  }
-
-  // Messages API
-  messages = {
-    getByContact: (contactId: number, params?: any) =>
-      this.get<Message[]>(`/messages/${contactId}`, params),
-    send: (data: { contactId: number; content: string; type?: string }) =>
-      this.post<Message>('/messages/send', data),
-    delete: (id: number) => this.delete(`/messages/${id}`),
-    markAsRead: (contactId: number) => this.put(`/messages/${contactId}/read`),
-  }
-
-  // Files API
-  files = {
-    upload: (file: File, contactId?: number) => {
-      const formData = new FormData()
-      formData.append('file', file)
-      if (contactId) {
-        formData.append('contactId', contactId.toString())
-      }
-
-      return this.api.post('/files/upload', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' },
-      })
-    },
-    delete: (id: number) => this.delete(`/files/${id}`),
-    download: (id: number) => this.api.get(`/files/${id}/download`, { responseType: 'blob' }),
-  }
-
-  // Stats API
-  stats = {
-    getDashboard: () => this.get<DashboardStats>('/stats/dashboard'),
-    getContactsStats: (period?: string) => this.get(`/stats/contacts?period=${period || 'month'}`),
-    getDealsStats: (period?: string) => this.get(`/stats/deals?period=${period || 'month'}`),
-  }
-
-  // Settings API
-  settings = {
-    getTelegramConfig: () => this.get('/settings/telegram'),
-    updateTelegramConfig: (data: any) => this.put('/settings/telegram', data),
-    testTelegramConnection: () => this.post('/settings/telegram/test'),
-  }
-}
-
-export const api = new ApiService()
-
-// Экспорт отдельных API модулей для удобства
-export const authApi = api.auth
-export const contactsApi = api.contacts
-export const contactFieldsApi = api.contactFields
-export const dealsApi = api.deals
-export const dealStagesApi = api.dealStages
-export const messagesApi = api.messages
-export const filesApi = api.files
-export const statsApi = api.stats
-export const settingsApi = api.settings
