@@ -1,41 +1,62 @@
+// frontend/src/main.tsx
 import React from 'react'
 import ReactDOM from 'react-dom/client'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
+import { Toaster } from 'react-hot-toast'
+
+import App from './App'
+import ErrorBoundary from '@/components/common/ErrorBoundary'
 import './styles/index.css'
 
-function App() {
-  return (
-    <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold text-gray-900 mb-4">
-          🚀 Telegram CRM System
-        </h1>
-        <p className="text-gray-600 mb-8">
-          Frontend успешно запущен!
-        </p>
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6 max-w-md mx-auto">
-          <h2 className="text-lg font-semibold mb-4">Статус системы:</h2>
-          <div className="space-y-2 text-left">
-            <div className="flex items-center">
-              <div className="w-2 h-2 bg-green-400 rounded-full mr-3"></div>
-              <span className="text-sm">Frontend запущен</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-2 h-2 bg-green-400 rounded-full mr-3"></div>
-              <span className="text-sm">Backend API работает</span>
-            </div>
-            <div className="flex items-center">
-              <div className="w-2 h-2 bg-yellow-400 rounded-full mr-3"></div>
-              <span className="text-sm">Telegram Bot в разработке</span>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  )
-}
+// Создаем QueryClient с оптимальными настройками
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      staleTime: 5 * 60 * 1000, // 5 минут
+      retry: 3,
+      refetchOnWindowFocus: false,
+    },
+    mutations: {
+      retry: 1,
+    },
+  },
+})
 
 ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+    <ErrorBoundary>
+      <QueryClientProvider client={queryClient}>
+        <App />
+        <Toaster 
+          position="top-right"
+          toastOptions={{
+            // Общие настройки для всех toast
+            duration: 4000,
+            style: {
+              background: '#ffffff',
+              color: '#374151',
+              border: '1px solid #e5e7eb',
+              borderRadius: '0.5rem',
+              fontSize: '14px',
+            },
+            // Настройки для успешных toast
+            success: {
+              iconTheme: {
+                primary: '#10b981',
+                secondary: '#ffffff',
+              },
+            },
+            // Настройки для ошибок
+            error: {
+              iconTheme: {
+                primary: '#ef4444',
+                secondary: '#ffffff',
+              },
+              duration: 6000,
+            },
+          }}
+        />
+      </QueryClientProvider>
+    </ErrorBoundary>
+  </React.StrictMode>
 )
