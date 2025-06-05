@@ -1,3 +1,4 @@
+// backend/src/index.ts - исправленная версия
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -26,15 +27,65 @@ import statsRoutes from '@/routes/stats'
 dotenv.config()
 
 const app = express()
-const PORT = process.env.PORT || 3001
+const PORT = parseInt(process.env.PORT || '3001') // FIX: Приводим к числу
 
 // Trust proxy (важно для rate limiting и IP detection)
 app.set('trust proxy', 1)
 
-// Security middleware
+// ИСПРАВЛЕННЫЕ CORS настройки
+const corsOptions = {
+  origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
+    // Разрешаем запросы без origin (например, мобильные приложения)
+    if (!origin) return callback(null, true)
+
+    // Список разрешенных origins
+    const allowedOrigins = [
+      'http://localhost:3000',
+      'http://127.0.0.1:3000',
+      'http://193.233.103.164:3000',  // Ваш сервер
+      'http://193.233.103.164',
+      ...(process.env.CORS_ORIGIN?.split(',') || [])
+    ]
+
+    // В development разрешаем все localhost и 127.0.0.1
+    if (process.env.NODE_ENV === 'development') {
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return callback(null, true)
+      }
+    }
+
+    if (allowedOrigins.includes(origin)) {
+      callback(null, true)
+    } else {
+      // FIX: Исправляем logger.warn с правильными параметрами
+      logger.warn('CORS blocked request from origin', { origin })
+      callback(new Error('Not allowed by CORS'), false)
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Origin',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers'
+  ],
+  exposedHeaders: ['Authorization'],
+  maxAge: 86400, // 24 hours
+}
+
+app.use(cors(corsOptions))
+
+// Добавляем preflight для всех routes
+app.options('*', cors(corsOptions))
+
+// Security middleware (обновленный для развития)
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
-  contentSecurityPolicy: {
+  contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
     directives: {
       defaultSrc: ["'self'"],
       styleSrc: ["'self'", "'unsafe-inline'"],
@@ -42,15 +93,7 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", "https://api.telegram.org"],
     },
-  },
-}))
-
-// CORS configuration
-app.use(cors({
-  origin: process.env.CORS_ORIGIN?.split(',') || ['http://localhost:3000'],
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  } : false, // Отключаем CSP в development
 }))
 
 // Compression and parsing
@@ -58,28 +101,61 @@ app.use(compression())
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
-// Logging
+// Логирование запросов (улучшенное)
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('combined', {
     stream: {
       write: (message: string) => logger.info(message.trim())
     }
   }))
+
+  // Дополнительное логирование для отладки CORS
+  app.use((req, res, next) => {
+    logger.debug('Incoming request', {
+      method: req.method,
+      url: req.originalUrl,
+      origin: req.get('Origin'),
+      userAgent: req.get('User-Agent'),
+      contentType: req.get('Content-Type'),
+      authorization: req.get('Authorization') ? 'Bearer ***' : 'none'
+    })
+    next()
+  })
 }
 
-// Rate limiting
-app.use('/api/', rateLimiter)
+// Rate limiting (исключаем префлайт запросы)
+app.use('/api/', (req, res, next) => {
+  if (req.method === 'OPTIONS') {
+    return next()
+  }
+  return rateLimiter(req, res, next)
+})
 
 // Static files (uploads)
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')))
 
-// Health check endpoint
+// Health check endpoint (расширенный)
 app.get('/health', (req, res) => {
   res.status(200).json({
     status: 'OK',
     timestamp: new Date().toISOString(),
     uptime: process.uptime(),
     environment: process.env.NODE_ENV,
+    version: '1.0.0',
+    cors: {
+      origin: req.get('Origin') || 'none',
+      allowed: true
+    }
+  })
+})
+
+// Test endpoint для проверки CORS
+app.get('/api/test', (req, res) => {
+  res.json({
+    success: true,
+    message: 'CORS test successful',
+    origin: req.get('Origin'),
+    timestamp: new Date().toISOString()
   })
 })
 
@@ -122,12 +198,13 @@ const startServer = async () => {
     await connectDatabase()
     logger.info('Database connected successfully')
 
-    // Start HTTP server
-    server = app.listen(PORT, () => {
+    // FIX: Правильно задаем типы для app.listen
+    server = app.listen(PORT, '0.0.0.0', () => {
       logger.info(`🚀 Server running on port ${PORT}`)
       logger.info(`📱 Environment: ${process.env.NODE_ENV}`)
       logger.info(`🔗 API: http://localhost:${PORT}/api`)
       logger.info(`❤️  Health: http://localhost:${PORT}/health`)
+      logger.info(`🌐 CORS enabled for development`)
     })
 
     // Setup graceful shutdown

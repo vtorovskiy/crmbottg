@@ -219,8 +219,8 @@ const LoginPage: React.FC = () => {
         </motion.div>
       </div>
 
-      {/* Добавляем CSS для анимации blob */}
-      <style jsx>{`
+      {/* Добавляем CSS для анимации blob через обычный style тег */}
+      <style>{`
         @keyframes blob {
           0% {
             transform: translate(0px, 0px) scale(1);

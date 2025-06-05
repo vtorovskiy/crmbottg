@@ -87,7 +87,7 @@ class ApiService {
           toast.error('Недостаточно прав доступа')
         } else if (error.response?.status === 404) {
           toast.error('Ресурс не найден')
-        } else if (error.response?.status >= 500) {
+        } else if (error.response?.status && error.response.status >= 500) {
           toast.error('Ошибка сервера. Попробуйте позже.')
         } else if (error.code === 'NETWORK_ERROR' || error.message.includes('Network Error')) {
           toast.error('Ошибка подключения к серверу')
