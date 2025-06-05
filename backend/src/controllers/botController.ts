@@ -565,8 +565,8 @@ ${amount ? `💰 ${amount.toLocaleString('ru-RU')}₽` : ''}
       const response = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getMe`)
       const data = await response.json()
 
-      if (data.ok) {
-        return data.result
+      if ((data as any).ok) {
+        return (data as any).result
       } else {
         logger.error('Failed to get bot info', data)
         return null
@@ -618,10 +618,10 @@ ${amount ? `💰 ${amount.toLocaleString('ru-RU')}₽` : ''}
       )
       const data = await response.json()
 
-      if (data.ok) {
-        return data.result
+      if ((data as any).ok) {
+        return (data as any).result
       } else {
-        return { error: data.description }
+        return { error: (data as any).description }
       }
     } catch (error) {
       logger.error('Error getting webhook status', error)

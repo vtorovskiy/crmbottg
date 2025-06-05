@@ -3,6 +3,7 @@ import { botService } from './botService'
 import { poizonService } from './poizonService'
 import { logger } from '@/utils/logger'
 import type { TelegramMessage, TelegramCallbackQuery } from '@/types/telegram'
+import { db } from '@/config/database'
 
 interface UserSession {
   step: string
@@ -423,7 +424,7 @@ class BotMessageHandler {
     }
 
     // Группируем кнопки по 4 в ряд
-    const sizeButtons = []
+    const sizeButtons: any[][] = []
     for (let i = 0; i < availableVariants.length; i += 4) {
       const row = availableVariants.slice(i, i + 4).map((variant: any) => ({
         text: variant.option2 || variant.options?.find((o: any) => o.name === 'Size')?.value || 'N/A',
@@ -461,10 +462,10 @@ class BotMessageHandler {
     session.data.selectedVariant = selectedVariant
     userSessions.set(user.telegram_id, session)
 
-    await this.showPriceCalculation(chatId, session.data)
+    await this.showPriceCalculation(chatId, session.data, user)
   }
 
-  async showPriceCalculation(chatId: number, sessionData: any): Promise<void> {
+  async showPriceCalculation(chatId: number, sessionData: any, user: any): Promise<void> {
     const { productData, selectedCategory, selectedVariant } = sessionData
     const product = productData.product
 
@@ -782,7 +783,7 @@ POIZON (得物) - крупнейшая китайская платформа д�
 
     orders.slice(0, 5).forEach(order => {
       const statusEmoji = this.getStatusEmoji(order.status)
-      const date = new Date(order.created_at).toLocaleDateString('ru-RU')
+      const date = new Date((order as any).created_at || new Date()).toLocaleDateString('ru-RU')
 
       text += `${statusEmoji} ${order.order_number} от ${date}\n`
       text += `${order.product_title}, размер ${order.product_size}\n`
@@ -1061,7 +1062,7 @@ ${stats.popularCategories?.map((cat: any, i: number) =>
         userQuery += ' AND registration_date > NOW() - INTERVAL \'30 days\''
       }
 
-      const result = await botService.db.query(userQuery)
+      const result = await db.query(userQuery)
       const users = result.rows
 
       let sent = 0
@@ -1114,7 +1115,7 @@ ${stats.popularCategories?.map((cat: any, i: number) =>
         ORDER BY registration_date DESC
       `
 
-      const result = await botService.db.query(query)
+      const result = await db.query(query)
       const users = result.rows
 
       if (format === 'json') {
@@ -1184,9 +1185,9 @@ ${stats.popularCategories?.map((cat: any, i: number) =>
       `
 
       const [userResult, ordersResult, apiResult] = await Promise.all([
-        botService.db.query(userQuery, [telegramId]),
-        botService.db.query(ordersQuery, [telegramId]),
-        botService.db.query(apiUsageQuery, [telegramId])
+        db.query(userQuery, [telegramId]),
+        db.query(ordersQuery, [telegramId]),
+        db.query(apiUsageQuery, [telegramId])
       ])
 
       if (userResult.rows.length === 0) {
