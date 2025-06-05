@@ -1,4 +1,4 @@
-// backend/src/index.ts - исправленная версия
+// backend/src/index.ts - обновленная версия с интеграцией бота
 import express from 'express'
 import cors from 'cors'
 import helmet from 'helmet'
@@ -13,6 +13,10 @@ import { rateLimiter } from '@/middleware/rateLimiter'
 import { logger } from '@/utils/logger'
 import { connectDatabase } from '@/config/database'
 
+// Import services
+import { botService } from '@/services/botService'
+import { botMessageHandler } from '@/services/botMessageHandler'
+
 // Import routes
 import authRoutes from '@/routes/auth'
 import contactRoutes from '@/routes/contacts'
@@ -22,32 +26,30 @@ import fileRoutes from '@/routes/files'
 import telegramRoutes from '@/routes/telegram'
 import settingsRoutes from '@/routes/settings'
 import statsRoutes from '@/routes/stats'
+import botRoutes from '@/routes/bot' // 🆕 НОВЫЙ МАРШРУТ БОТА
 
 // Load environment variables
 dotenv.config()
 
 const app = express()
-const PORT = parseInt(process.env.PORT || '3001') // FIX: Приводим к числу
+const PORT = parseInt(process.env.PORT || '3001')
 
 // Trust proxy (важно для rate limiting и IP detection)
 app.set('trust proxy', 1)
 
-// ИСПРАВЛЕННЫЕ CORS настройки
+// CORS настройки
 const corsOptions = {
   origin: function (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) {
-    // Разрешаем запросы без origin (например, мобильные приложения)
     if (!origin) return callback(null, true)
 
-    // Список разрешенных origins
     const allowedOrigins = [
       'http://localhost:3000',
       'http://127.0.0.1:3000',
-      'http://193.233.103.164:3000',  // Ваш сервер
+      'http://193.233.103.164:3000',
       'http://193.233.103.164',
       ...(process.env.CORS_ORIGIN?.split(',') || [])
     ]
 
-    // В development разрешаем все localhost и 127.0.0.1
     if (process.env.NODE_ENV === 'development') {
       if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
         return callback(null, true)
@@ -57,7 +59,6 @@ const corsOptions = {
     if (allowedOrigins.includes(origin)) {
       callback(null, true)
     } else {
-      // FIX: Исправляем logger.warn с правильными параметрами
       logger.warn('CORS blocked request from origin', { origin })
       callback(new Error('Not allowed by CORS'), false)
     }
@@ -74,15 +75,13 @@ const corsOptions = {
     'Access-Control-Request-Headers'
   ],
   exposedHeaders: ['Authorization'],
-  maxAge: 86400, // 24 hours
+  maxAge: 86400,
 }
 
 app.use(cors(corsOptions))
-
-// Добавляем preflight для всех routes
 app.options('*', cors(corsOptions))
 
-// Security middleware (обновленный для развития)
+// Security middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: process.env.NODE_ENV === 'production' ? {
@@ -93,7 +92,7 @@ app.use(helmet({
       imgSrc: ["'self'", "data:", "https:"],
       connectSrc: ["'self'", "https://api.telegram.org"],
     },
-  } : false, // Отключаем CSP в development
+  } : false,
 }))
 
 // Compression and parsing
@@ -101,7 +100,7 @@ app.use(compression())
 app.use(express.json({ limit: '10mb' }))
 app.use(express.urlencoded({ extended: true, limit: '10mb' }))
 
-// Логирование запросов (улучшенное)
+// Логирование запросов
 if (process.env.NODE_ENV !== 'test') {
   app.use(morgan('combined', {
     stream: {
@@ -109,7 +108,6 @@ if (process.env.NODE_ENV !== 'test') {
     }
   }))
 
-  // Дополнительное логирование для отладки CORS
   app.use((req, res, next) => {
     logger.debug('Incoming request', {
       method: req.method,
@@ -123,9 +121,9 @@ if (process.env.NODE_ENV !== 'test') {
   })
 }
 
-// Rate limiting (исключаем префлайт запросы)
+// Rate limiting (исключаем Telegram webhook)
 app.use('/api/', (req, res, next) => {
-  if (req.method === 'OPTIONS') {
+  if (req.method === 'OPTIONS' || req.path === '/bot/webhook') {
     return next()
   }
   return rateLimiter(req, res, next)
@@ -135,18 +133,43 @@ app.use('/api/', (req, res, next) => {
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')))
 
 // Health check endpoint (расширенный)
-app.get('/health', (req, res) => {
-  res.status(200).json({
-    status: 'OK',
-    timestamp: new Date().toISOString(),
-    uptime: process.uptime(),
-    environment: process.env.NODE_ENV,
-    version: '1.0.0',
-    cors: {
-      origin: req.get('Origin') || 'none',
-      allowed: true
+app.get('/health', async (req, res) => {
+  try {
+    // Проверяем состояние бота
+    let botStatus = 'not_configured'
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      try {
+        // Простая проверка токена бота
+        const response = await fetch(`https://api.telegram.org/bot${process.env.TELEGRAM_BOT_TOKEN}/getMe`)
+        botStatus = response.ok ? 'healthy' : 'unhealthy'
+      } catch {
+        botStatus = 'unhealthy'
+      }
     }
-  })
+
+    res.status(200).json({
+      status: 'OK',
+      timestamp: new Date().toISOString(),
+      uptime: process.uptime(),
+      environment: process.env.NODE_ENV,
+      version: '1.0.0',
+      services: {
+        database: 'healthy', // Предполагаем что БД работает если сервер запустился
+        bot: botStatus
+      },
+      cors: {
+        origin: req.get('Origin') || 'none',
+        allowed: true
+      }
+    })
+  } catch (error) {
+    logger.error('Health check error', error)
+    res.status(503).json({
+      status: 'ERROR',
+      timestamp: new Date().toISOString(),
+      error: 'Health check failed'
+    })
+  }
 })
 
 // Test endpoint для проверки CORS
@@ -168,6 +191,7 @@ app.use('/api/files', fileRoutes)
 app.use('/api/telegram', telegramRoutes)
 app.use('/api/settings', settingsRoutes)
 app.use('/api/stats', statsRoutes)
+app.use('/api/bot', botRoutes) // 🆕 НОВЫЙ МАРШРУТ БОТА
 
 // Error handling
 app.use(notFoundHandler)
@@ -184,7 +208,6 @@ const gracefulShutdown = (signal: string) => {
     process.exit(0)
   })
 
-  // Force close after 10 seconds
   setTimeout(() => {
     logger.error('Could not close connections in time, forcefully shutting down')
     process.exit(1)
@@ -198,12 +221,26 @@ const startServer = async () => {
     await connectDatabase()
     logger.info('Database connected successfully')
 
-    // FIX: Правильно задаем типы для app.listen
+    // 🆕 ИНИЦИАЛИЗАЦИЯ БОТА
+    if (process.env.TELEGRAM_BOT_TOKEN) {
+      try {
+        await botService.initialize()
+        await botMessageHandler.initialize()
+        logger.info('🤖 Telegram bot services initialized successfully')
+      } catch (error) {
+        logger.error('❌ Failed to initialize bot services', error)
+        logger.warn('⚠️ Bot functionality will be disabled')
+      }
+    } else {
+      logger.warn('⚠️ TELEGRAM_BOT_TOKEN not set - bot functionality disabled')
+    }
+
     server = app.listen(PORT, '0.0.0.0', () => {
       logger.info(`🚀 Server running on port ${PORT}`)
       logger.info(`📱 Environment: ${process.env.NODE_ENV}`)
       logger.info(`🔗 API: http://localhost:${PORT}/api`)
       logger.info(`❤️  Health: http://localhost:${PORT}/health`)
+      logger.info(`🤖 Bot webhook: http://localhost:${PORT}/api/bot/webhook`)
       logger.info(`🌐 CORS enabled for development`)
     })
 
