@@ -3,6 +3,7 @@ import axios from 'axios'
 import { db } from '@/config/database'
 import { logger } from '@/utils/logger'
 import type { TelegramUpdate, TelegramMessage, TelegramUser } from '@/types/telegram'
+import { saveMessageToCRM, createOutgoingMessage } from '@/utils/messageUtils'
 
 interface BotUser {
   id: number
@@ -476,7 +477,7 @@ class BotService {
   async sendMessage(
     chatId: number | string,
     text: string,
-    options?: any
+    options?: any & { contact_id?: number } // 🆕 добавляем contact_id
   ): Promise<any> {
     try {
       const response = await axios.post(`${this.apiUrl}/sendMessage`, {
@@ -485,6 +486,20 @@ class BotService {
         parse_mode: 'HTML',
         ...options
       })
+
+      // 🆕 Сохраняем исходящее сообщение в CRM (если есть contact_id в options)
+      if (options?.contact_id) {
+        try {
+          const outgoingMessage = createOutgoingMessage(
+            response.data.result.message_id,
+            text,
+            chatId
+          )
+          await saveMessageToCRM(outgoingMessage, options.contact_id, 'outgoing')
+        } catch (error) {
+          logger.warn('Could not save outgoing message to CRM', error as Error)
+        }
+      }
 
       return response.data.result
     } catch (error) {

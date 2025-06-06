@@ -4,6 +4,8 @@ import { poizonService } from './poizonService'
 import { logger } from '@/utils/logger'
 import type { TelegramMessage, TelegramCallbackQuery } from '@/types/telegram'
 import { db } from '@/config/database'
+import { saveMessageToCRM, ensureContactExists } from '@/utils/messageUtils'
+
 
 interface UserSession {
   step: string
@@ -12,6 +14,8 @@ interface UserSession {
 
 // Хранилище сессий пользователей (в production лучше использовать Redis)
 const userSessions = new Map<string, UserSession>()
+
+const recentSentMessages = new Map<number, { timestamp: number; sent_by_admin: boolean }>()
 
 // Категории товаров
 const CATEGORIES = {
@@ -31,9 +35,22 @@ class BotMessageHandler {
 
   async handleMessage(message: TelegramMessage): Promise<void> {
     try {
+      const messageId = message.message_id
       const user = await botService.findOrCreateUser(message.from!)
       const chatId = message.chat.id
       const text = message.text || ''
+
+      // Проверяем не отправляли ли мы это сообщение сами
+      if (recentSentMessages.has(messageId)) {
+        logger.debug('Skipping message sent by admin', { messageId })
+        recentSentMessages.delete(messageId)
+        return // НЕ сохраняем дубликат
+      }
+
+      // 🆕 СОХРАНЯЕМ СООБЩЕНИЕ В CRM
+      const contactId = await ensureContactExists(message.from!)
+      await saveMessageToCRM(message, contactId, 'incoming')
+
 
       // Логируем действие пользователя
       await botService.logUserAction(user.id, 'message_received', {

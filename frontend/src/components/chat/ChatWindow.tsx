@@ -1,4 +1,4 @@
-// frontend/src/components/chat/ChatWindow.tsx
+// frontend/src/components/chat/ChatWindow.tsx - ИСПРАВЛЕННАЯ ВЕРСИЯ
 import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { Send, Smile, Paperclip, Image, ArrowDown, MoreVertical, Trash2, Copy, Reply } from 'lucide-react'
@@ -64,22 +64,83 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
     queryKey: ['messages', contactId],
     queryFn: () => messagesApi.getMessageHistory(contactId),
     refetchInterval: 5000, // Обновляем каждые 5 секунд
-    enabled: !!contactId
+    enabled: !!contactId,
+    staleTime: 1000, // Данные считаются устаревшими через 1 секунду
+    refetchOnWindowFocus: false // Отключаем рефетч при фокусе окна
   })
 
   // Мутация для отправки сообщения
   const sendMessageMutation = useMutation({
     mutationFn: (data: { contactId: number; content: string; type?: string }) =>
       messagesApi.sendMessage(data),
-    onSuccess: () => {
-      setMessageText('')
-      queryClient.invalidateQueries({ queryKey: ['messages', contactId] })
-      queryClient.invalidateQueries({ queryKey: ['contacts-list'] })
-      scrollToBottom()
+    onMutate: async (variables) => {
+      // Optimistic update
+      await queryClient.cancelQueries({ queryKey: ['messages', contactId] })
+
+      const previousMessages = queryClient.getQueryData(['messages', contactId])
+
+      // Создаем временное сообщение
+      const optimisticMessage = {
+        id: Date.now(), // временный ID
+        content: variables.content,
+        type: variables.type || 'text',
+        direction: 'outgoing' as const,
+        is_read: true,
+        created_at: new Date().toISOString(),
+        sender_admin: 'you'
+      }
+
+      // Обновляем кэш с новым сообщением
+      queryClient.setQueryData(['messages', contactId], (old: any) => {
+        if (!old?.data?.messages) return old
+
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            messages: [...old.data.messages, optimisticMessage]
+          }
+        }
+      })
+
+      return { previousMessages }
     },
-    onError: (error) => {
+    onSuccess: (data) => {
+      // Заменяем optimistic update реальными данными
+      queryClient.setQueryData(['messages', contactId], (old: any) => {
+        if (!old?.data?.messages) return old
+
+        const messages = old.data.messages.filter((msg: Message) => msg.id !== Date.now())
+        return {
+          ...old,
+          data: {
+            ...old.data,
+            messages: [...messages, data.data]
+          }
+        }
+      })
+
+      setMessageText('')
+
+      // Обновляем список контактов
+      queryClient.invalidateQueries({ queryKey: ['contacts-list'] })
+
+      // Принудительный скролл вниз
+      setTimeout(() => {
+        scrollToBottom(true)
+      }, 100)
+    },
+    onError: (error, variables, context) => {
+      // Откатываем optimistic update
+      if (context?.previousMessages) {
+        queryClient.setQueryData(['messages', contactId], context.previousMessages)
+      }
+
       console.error('Send message error:', error)
       toast.error('Не удалось отправить сообщение')
+    },
+    onSettled: () => {
+      setIsTyping(false)
     }
   })
 
@@ -102,9 +163,12 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
   const scrollToBottom = useCallback((force = false) => {
     if (!shouldAutoScroll && !force) return
 
-    messagesEndRef.current?.scrollIntoView({
-      behavior: force ? 'auto' : 'smooth'
-    })
+    setTimeout(() => {
+      messagesEndRef.current?.scrollIntoView({
+        behavior: force ? 'auto' : 'smooth',
+        block: 'end'
+      })
+    }, 50)
   }, [shouldAutoScroll])
 
   const handleScroll = useCallback(() => {
@@ -112,7 +176,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
     if (!container) return
 
     const { scrollTop, scrollHeight, clientHeight } = container
-    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 100
 
     if (!isAtBottom && !isUserScrolling) {
       setIsUserScrolling(true)
@@ -125,31 +189,43 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
     }
   }, [isUserScrolling])
 
+  // Отслеживаем изменения в сообщениях для автоскролла
   useEffect(() => {
     const currentMessageCount = messages.length
-    const isNewMessage = currentMessageCount > lastMessageCountRef.current
+    const hasNewMessages = currentMessageCount > lastMessageCountRef.current
 
-    if (isNewMessage) {
+    if (hasNewMessages) {
       const isFirstLoad = lastMessageCountRef.current === 0
-      scrollToBottom(isFirstLoad)
+
+      if (isFirstLoad || shouldAutoScroll) {
+        scrollToBottom(isFirstLoad)
+      }
     }
 
     lastMessageCountRef.current = currentMessageCount
-  }, [messages.length, scrollToBottom])
+  }, [messages.length, scrollToBottom, shouldAutoScroll])
 
+  // Устанавливаем обработчик скролла
   useEffect(() => {
     const container = messagesContainerRef.current
     if (!container) return
 
-    container.addEventListener('scroll', handleScroll, { passive: true })
-    return () => container.removeEventListener('scroll', handleScroll)
+    const handleScrollThrottled = () => {
+      requestAnimationFrame(handleScroll)
+    }
+
+    container.addEventListener('scroll', handleScrollThrottled, { passive: true })
+
+    return () => {
+      container.removeEventListener('scroll', handleScrollThrottled)
+    }
   }, [handleScroll])
 
   // Автоматическое изменение высоты textarea
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
-      textareaRef.current.style.height = `${textareaRef.current.scrollHeight}px`
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`
     }
   }, [messageText])
 
@@ -160,22 +236,30 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
     }
   }, [contactId, messages])
 
+  // Сброс состояния при смене контакта
+  useEffect(() => {
+    setIsUserScrolling(false)
+    setShouldAutoScroll(true)
+    setShowMessageActions(null)
+    lastMessageCountRef.current = 0
+  }, [contactId])
+
   const handleSendMessage = async () => {
     const trimmedText = messageText.trim()
     if (!trimmedText || sendMessageMutation.isPending) return
 
     setIsTyping(true)
     setShouldAutoScroll(true)
+
     try {
       await sendMessageMutation.mutateAsync({
         contactId,
         content: trimmedText,
         type: 'text'
       })
-    } finally {
-      setIsTyping(false)
+    } catch (error) {
+      // Ошибка уже обработана в onError
     }
-    setTimeout(() => scrollToBottom(true), 100)
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -284,24 +368,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
       <div
         ref={messagesContainerRef}
         className="flex-1 overflow-y-auto p-4 space-y-4"
-        style={{ scrollBehavior: 'smooth' }}
       >
-        {isUserScrolling && (
-          <motion.button
-            initial={{ opacity: 0, scale: 0.8 }}
-            animate={{ opacity: 1, scale: 1 }}
-            exit={{ opacity: 0, scale: 0.8 }}
-            onClick={() => {
-              setShouldAutoScroll(true)
-              setIsUserScrolling(false)
-              scrollToBottom(true)
-            }}
-            className="fixed bottom-20 right-8 z-10 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors"
-            title="Прокрутить к новым сообщениям"
-          >
-            <ArrowDown className="w-5 h-5" />
-          </motion.button>
-        )}
+        {/* Кнопка "Прокрутить вниз" */}
+        <AnimatePresence>
+          {isUserScrolling && (
+            <motion.button
+              initial={{ opacity: 0, scale: 0.8 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.8 }}
+              onClick={() => {
+                setShouldAutoScroll(true)
+                setIsUserScrolling(false)
+                scrollToBottom(true)
+              }}
+              className="fixed bottom-20 right-8 z-10 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors"
+              title="Прокрутить к новым сообщениям"
+            >
+              <ArrowDown className="w-5 h-5" />
+            </motion.button>
+          )}
+        </AnimatePresence>
+
         {messages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">
@@ -367,22 +454,24 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
         )}
 
         {/* Индикатор печати */}
-        {isTyping && (
-          <motion.div
-            initial={{ opacity: 0, y: 10 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -10 }}
-            className="flex justify-start"
-          >
-            <div className="bg-white rounded-2xl px-4 py-2 shadow-sm">
-              <div className="flex space-x-1">
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75" />
-                <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150" />
+        <AnimatePresence>
+          {isTyping && (
+            <motion.div
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -10 }}
+              className="flex justify-start"
+            >
+              <div className="bg-white rounded-2xl px-4 py-2 shadow-sm">
+                <div className="flex space-x-1">
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce" />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-75" />
+                  <div className="w-2 h-2 bg-gray-400 rounded-full animate-bounce delay-150" />
+                </div>
               </div>
-            </div>
-          </motion.div>
-        )}
+            </motion.div>
+          )}
+        </AnimatePresence>
 
         <div ref={messagesEndRef} />
       </div>
@@ -406,6 +495,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
               rows={1}
               className="w-full px-4 py-2 pr-12 text-sm bg-gray-50 border border-gray-200 rounded-2xl focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent resize-none max-h-32"
               style={{ minHeight: '40px' }}
+              disabled={sendMessageMutation.isPending}
             />
 
             {/* Кнопка эмодзи */}
@@ -422,7 +512,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
             disabled={!messageText.trim() || sendMessageMutation.isPending}
             className={`
               flex-shrink-0 p-2 rounded-lg transition-all duration-200
-              ${messageText.trim() 
+              ${messageText.trim() && !sendMessageMutation.isPending
                 ? 'bg-blue-600 text-white hover:bg-blue-700 shadow-md' 
                 : 'bg-gray-100 text-gray-400 cursor-not-allowed'
               }

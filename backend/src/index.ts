@@ -1,10 +1,14 @@
 // backend/src/index.ts - обновленная версия с интеграцией бота
-import express from 'express'
+import dotenv from 'dotenv'
+
+// ЗАГРУЖАЕМ ПЕРЕМЕННЫЕ ОКРУЖЕНИЯ ПЕРВЫМ ДЕЛОМ
+dotenv.config()
+
 import cors from 'cors'
 import helmet from 'helmet'
 import compression from 'compression'
 import morgan from 'morgan'
-import dotenv from 'dotenv'
+import express from 'express'
 import path from 'path'
 
 import { errorHandler } from '@/middleware/errorHandler'
@@ -27,9 +31,6 @@ import telegramRoutes from '@/routes/telegram'
 import settingsRoutes from '@/routes/settings'
 import statsRoutes from '@/routes/stats'
 import botRoutes from '@/routes/bot' // 🆕 НОВЫЙ МАРШРУТ БОТА
-
-// Load environment variables
-dotenv.config()
 
 const app = express()
 const PORT = parseInt(process.env.PORT || '3001')
