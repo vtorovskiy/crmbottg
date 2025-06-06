@@ -43,6 +43,7 @@ const corsOptions = {
     if (!origin) return callback(null, true)
 
     const allowedOrigins = [
+      "https://crm.squarestore.ru",
       'http://localhost:3000',
       'http://127.0.0.1:3000',
       'http://193.233.103.164:3000',
