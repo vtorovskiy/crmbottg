@@ -306,12 +306,86 @@ class ApiService {
 
   // ===== MESSAGES API =====
   messages = {
+    // Получить список контактов с последними сообщениями
+    getContactsList: async (): Promise<ApiResponse<any[]>> => {
+      return await this.get<any[]>('/messages/contacts')
+    },
+
+    // Получить историю сообщений с контактом
+    getMessageHistory: async (
+      contactId: number,
+      params?: {
+        page?: number
+        limit?: number
+        search?: string
+      }
+    ): Promise<ApiResponse<{
+      contact: any
+      messages: any[]
+      pagination: {
+        page: number
+        limit: number
+        hasMore: boolean
+      }
+    }>> => {
+      return await this.get<any>(`/messages/${contactId}`, params)
+    },
+
+    // Отправить сообщение
+    sendMessage: async (data: {
+      contactId: number
+      content: string
+      type?: string
+    }): Promise<ApiResponse<any>> => {
+      return await this.post<any>('/messages/send', data)
+    },
+
+    // Удалить сообщение
+    deleteMessage: async (messageId: number): Promise<ApiResponse<void>> => {
+      return await this.delete<void>(`/messages/${messageId}`)
+    },
+
+    // Пометить сообщения как прочитанные
+    markAsRead: async (contactId: number): Promise<ApiResponse<void>> => {
+      return await this.post<void>(`/messages/${contactId}/mark-read`)
+    },
+
+    // Поиск по сообщениям
+    searchMessages: async (params: {
+      q: string
+      contact?: number
+      type?: string
+      direction?: string
+      limit?: number
+    }): Promise<ApiResponse<{
+      query: string
+      results: any[]
+      total: number
+    }>> => {
+      return await this.get<any>('/messages/search', params)
+    },
+
+    // Статистика по сообщениям
+    getStats: async (): Promise<ApiResponse<{
+      total_messages: number
+      incoming_messages: number
+      outgoing_messages: number
+      unread_messages: number
+      active_contacts: number
+      messages_today: number
+      messages_week: number
+    }>> => {
+      return await this.get<any>('/messages/stats')
+    },
+
+    // Старые методы для совместимости
     getByContact: async (contactId: number, params?: {
       page?: number
       limit?: number
       search?: string
     }): Promise<ApiResponse<Message[]>> => {
-      return await this.get<Message[]>(`/messages/${contactId}`, params)
+      const result = await this.get<any>(`/messages/${contactId}`, params)
+      return { ...result, data: result.data?.messages || [] }
     },
 
     send: async (data: {
@@ -327,7 +401,7 @@ class ApiService {
     },
 
     markAsRead: async (contactId: number): Promise<ApiResponse<void>> => {
-      return await this.put<void>(`/messages/${contactId}/read`)
+      return await this.post<void>(`/messages/${contactId}/mark-read`)
     },
   }
 
