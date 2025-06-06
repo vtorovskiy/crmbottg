@@ -80,8 +80,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
       const previousMessages = queryClient.getQueryData(['messages', contactId])
 
       // Создаем временное сообщение
+      const tempId = Date.now()
       const optimisticMessage = {
-        id: Date.now(), // временный ID
+        id: tempId, // временный ID
         content: variables.content,
         type: variables.type || 'text',
         direction: 'outgoing' as const,
@@ -103,14 +104,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
         }
       })
 
-      return { previousMessages }
+      return { previousMessages, tempId }
     },
-    onSuccess: (data) => {
+    onSuccess: (data, _variables, context) => {
       // Заменяем optimistic update реальными данными
       queryClient.setQueryData(['messages', contactId], (old: any) => {
         if (!old?.data?.messages) return old
 
-        const messages = old.data.messages.filter((msg: Message) => msg.id !== Date.now())
+        const messages = old.data.messages.filter((msg: Message) => msg.id !== context?.tempId)
         return {
           ...old,
           data: {
