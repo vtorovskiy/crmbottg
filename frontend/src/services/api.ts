@@ -399,10 +399,6 @@ class ApiService {
     delete: async (id: number): Promise<ApiResponse<void>> => {
       return await this.delete<void>(`/messages/${id}`)
     },
-
-    markAsRead: async (contactId: number): Promise<ApiResponse<void>> => {
-      return await this.post<void>(`/messages/${contactId}/mark-read`)
-    },
   }
 
   // ===== FILES API =====

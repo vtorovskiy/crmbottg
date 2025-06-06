@@ -1,7 +1,7 @@
 // frontend/src/components/chat/ChatWindow.tsx
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Send, Smile, Paperclip, Image, MoreVertical, Trash2, Copy, Reply } from 'lucide-react'
+import { Send, Smile, Paperclip, Image, ArrowDown, MoreVertical, Trash2, Copy, Reply } from 'lucide-react'
 import { motion, AnimatePresence } from 'framer-motion'
 import toast from 'react-hot-toast'
 import { formatDistanceToNow } from 'date-fns'
@@ -43,6 +43,10 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
   const [isTyping, setIsTyping] = useState(false)
   const [selectedMessages, setSelectedMessages] = useState<number[]>([])
   const [showMessageActions, setShowMessageActions] = useState<number | null>(null)
+
+  const [isUserScrolling, setIsUserScrolling] = useState(false)
+  const [shouldAutoScroll, setShouldAutoScroll] = useState(true)
+  const lastMessageCountRef = useRef(0)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const messagesContainerRef = useRef<HTMLDivElement>(null)
@@ -95,13 +99,51 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
   const messages: Message[] = messagesData?.data?.messages || []
 
   // Прокрутка к концу при новых сообщениях
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }
+  const scrollToBottom = useCallback((force = false) => {
+    if (!shouldAutoScroll && !force) return
+
+    messagesEndRef.current?.scrollIntoView({
+      behavior: force ? 'auto' : 'smooth'
+    })
+  }, [shouldAutoScroll])
+
+  const handleScroll = useCallback(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    const { scrollTop, scrollHeight, clientHeight } = container
+    const isAtBottom = scrollHeight - scrollTop - clientHeight < 50
+
+    if (!isAtBottom && !isUserScrolling) {
+      setIsUserScrolling(true)
+      setShouldAutoScroll(false)
+    }
+
+    if (isAtBottom && isUserScrolling) {
+      setIsUserScrolling(false)
+      setShouldAutoScroll(true)
+    }
+  }, [isUserScrolling])
 
   useEffect(() => {
-    scrollToBottom()
-  }, [messages.length])
+    const currentMessageCount = messages.length
+    const isNewMessage = currentMessageCount > lastMessageCountRef.current
+
+    if (isNewMessage) {
+      const isFirstLoad = lastMessageCountRef.current === 0
+      scrollToBottom(isFirstLoad)
+    }
+
+    lastMessageCountRef.current = currentMessageCount
+  }, [messages.length, scrollToBottom])
+
+  useEffect(() => {
+    const container = messagesContainerRef.current
+    if (!container) return
+
+    container.addEventListener('scroll', handleScroll, { passive: true })
+    return () => container.removeEventListener('scroll', handleScroll)
+  }, [handleScroll])
 
   // Автоматическое изменение высоты textarea
   useEffect(() => {
@@ -123,6 +165,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
     if (!trimmedText || sendMessageMutation.isPending) return
 
     setIsTyping(true)
+    setShouldAutoScroll(true)
     try {
       await sendMessageMutation.mutateAsync({
         contactId,
@@ -132,6 +175,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
     } finally {
       setIsTyping(false)
     }
+    setTimeout(() => scrollToBottom(true), 100)
   }
 
   const handleKeyPress = (e: React.KeyboardEvent) => {
@@ -242,6 +286,22 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ contactId, contact }) => {
         className="flex-1 overflow-y-auto p-4 space-y-4"
         style={{ scrollBehavior: 'smooth' }}
       >
+        {isUserScrolling && (
+          <motion.button
+            initial={{ opacity: 0, scale: 0.8 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.8 }}
+            onClick={() => {
+              setShouldAutoScroll(true)
+              setIsUserScrolling(false)
+              scrollToBottom(true)
+            }}
+            className="fixed bottom-20 right-8 z-10 p-3 bg-blue-600 text-white rounded-full shadow-lg hover:bg-blue-700 transition-colors"
+            title="Прокрутить к новым сообщениям"
+          >
+            <ArrowDown className="w-5 h-5" />
+          </motion.button>
+        )}
         {messages.length === 0 ? (
           <div className="flex-1 flex items-center justify-center">
             <div className="text-center">

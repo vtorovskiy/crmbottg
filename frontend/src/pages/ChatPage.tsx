@@ -50,7 +50,15 @@ const ChatPage: React.FC = () => {
   })
 
   const contacts: Contact[] = contactsData?.data || []
-  const stats = statsData?.data || {}
+  const stats = statsData?.data || {
+    unread_messages: 0,
+    total_messages: 0,
+    active_contacts: 0,
+    incoming_messages: 0,
+    outgoing_messages: 0,
+    messages_today: 0,
+    messages_week: 0
+  }
 
   // Фильтруем контакты по поисковому запросу
   const filteredContacts = contacts.filter(contact => 
